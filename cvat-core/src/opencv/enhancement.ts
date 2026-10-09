@@ -186,9 +186,13 @@ const rieszGray: Method = (cv, px, width, height, params) => {
     }
 };
 
-// SuPeR (Milano Retinex), super_capi.cpp / super_luminance_capi.cpp. The C++ loops, for every pixel, over all brighter
-// levels or grid cells (~30 s per 24 MP frame); the summed weight is linear in the pixel position, so here running
-// sums over the levels / the sorted cells give the same sums in O(1) per pixel. Same result up to float rounding.
+// SuPeR (Milano Retinex), super_capi.cpp / super_luminance_capi.cpp, bit-identical to production. The C++ loops, for
+// every pixel, over all brighter levels or grid cells (~20 s per 24 MP frame in JS). The summed weight is linear in
+// the pixel position, so running sums over the levels / the sorted cells give the same sums in O(1) per pixel, up to
+// float rounding (~1e-12 here). That only changes the truncated output when the value is within rounding of an
+// integer: those pixels (a few %) are recomputed with the C++ loop, same operations in the same order.
+const NEAR_INTEGER = 1e-6;
+const nearInteger = (value: number): boolean => Math.abs(value - Math.round(value)) < NEAR_INTEGER;
 
 // super_capi.cpp Super::compute: per channel, grid of block maxima; out = v * sum(w_k / k) / sum(w_k) over the levels
 // k > v, w_k = sum over the blocks with maximum k of (K - squared distance to the block centre),
@@ -197,7 +201,7 @@ const superColor: Method = (_cv, px, width, height, { grid }) => {
     const M = Math.round(grid);
     const dR = Math.ceil(height / M);
     const dC = Math.ceil(width / M);
-    const K = (1 + 1e-9) * (height * height + width * width);
+    const K = (1.0 + 0.000000001) * (height * height + width * width);
     for (let ch = 0; ch < 3; ch++) {
         const bins = new Uint8Array(M * M);
         for (let r = 0; r < height; r++) {
@@ -207,28 +211,47 @@ const superColor: Method = (_cv, px, width, height, { grid }) => {
                 if (px[k] > bins[b]) bins[b] = px[k];
             }
         }
-        // per level k: count, sum x, sum x^2, sum y, sum y^2 of the block centres, plain (S) and divided by k (T),
-        // then summed from the top so that index v holds the totals over the levels above v
-        const S = Array.from({ length: 5 }, () => new Float64Array(257));
-        const T = Array.from({ length: 5 }, () => new Float64Array(257));
+        // fillAux: per level, count, sum x, sum x^2, sum y, sum y^2 of the block centres
+        const aux = Array.from({ length: 5 }, () => new Float64Array(256));
         for (let i = 0; i < M; i++) {
             for (let j = 0; j < M; j++) {
                 const v = bins[i * M + j];
                 const x = dR * (i + 0.5);
                 const y = dC * (j + 0.5);
-                [1, x, x * x, y, y * y].forEach((term, a) => { S[a][v] += term; T[a][v] += v ? term / v : 0; });
+                aux[0][v]++; aux[1][v] += x; aux[2][v] += x * x; aux[3][v] += y; aux[4][v] += y * y;
             }
         }
+        // the same per level divided by the level, then both summed from the top: index v holds the totals over the
+        // levels above v
+        const S = aux.map((a) => Float64Array.from({ length: 257 }, (_, v) => (v < 256 ? a[v] : 0)));
+        const T = aux.map((a) => Float64Array.from({ length: 257 }, (_, v) => (v > 0 && v < 256 ? a[v] / v : 0)));
         for (let a = 0; a < 5; a++) {
             for (let v = 255; v >= 0; v--) { S[a][v] += S[a][v + 1]; T[a][v] += T[a][v + 1]; }
         }
         for (let r = 0; r < height; r++) {
             for (let c = 0, k = r * width * 4 + ch; c < width; c++, k += 4) {
-                const v = px[k] + 1; // levels strictly above the pixel
+                const p = px[k];
+                const v = p + 1;
+                if (!S[0][v]) { px[k] = 255; continue; } // no level above: den = 0, res = 1
                 const A = K - r * r - c * c;
                 const den = A * S[0][v] + 2 * r * S[1][v] - S[2][v] + 2 * c * S[3][v] - S[4][v];
                 const num = A * T[0][v] + 2 * r * T[1][v] - T[2][v] + 2 * c * T[3][v] - T[4][v];
-                px[k] = Math.trunc(255 * (den > 0 ? (px[k] * num) / den : 1));
+                let out = 255 * ((p * num) / den);
+                if (nearInteger(out)) {
+                    let n = 0.0;
+                    let d = 0.0;
+                    for (let l = v; l < 256; l++) {
+                        if (aux[0][l] > 0) {
+                            let dist = aux[0][l] * r * r - 2 * r * aux[1][l] + aux[2][l];
+                            dist += aux[0][l] * c * c - 2 * c * aux[3][l] + aux[4][l];
+                            const Sdelta = aux[0][l] * K - dist;
+                            n += Sdelta / l;
+                            d += Sdelta;
+                        }
+                    }
+                    out = 255 * (d > 0.0 ? (p * n) / d : 1.0);
+                }
+                px[k] = Math.trunc(out);
             }
         }
     }
@@ -236,15 +259,67 @@ const superColor: Method = (_cv, px, width, height, { grid }) => {
 
 // super_luminance_capi.cpp: SuPeR on the channel mean with gridSize x gridSize overlapping windows, sorted by maximum;
 // each pixel sums over the windows whose maximum is >= its value, weight 1 - squared distance / diag^2
+interface Cell { row: number, col: number, intensity: number }
+
+// the C++ sorts the cells with a std::priority_queue: cells with the same maximum come out in the order of libstdc++'s
+// heap, which sets the order of the sums. These are its push_heap / pop_heap.
+function sortLikePriorityQueue(cells: Cell[]): Cell[] {
+    const heap: Cell[] = [];
+    const less = (a: Cell, b: Cell): boolean => a.intensity < b.intensity;
+    const pushHeap = (start: number, value: Cell): void => {
+        let hole = start;
+        let parent = Math.trunc((hole - 1) / 2);
+        while (hole > 0 && less(heap[parent], value)) {
+            heap[hole] = heap[parent];
+            hole = parent;
+            parent = Math.trunc((hole - 1) / 2);
+        }
+        heap[hole] = value;
+    };
+    const adjustHeap = (len: number, value: Cell): void => {
+        let hole = 0;
+        let child = 0;
+        while (child < Math.trunc((len - 1) / 2)) {
+            child = 2 * (child + 1);
+            if (less(heap[child], heap[child - 1])) child--;
+            heap[hole] = heap[child];
+            hole = child;
+        }
+        if ((len & 1) === 0 && child === Math.trunc((len - 2) / 2)) {
+            child = 2 * (child + 1);
+            heap[hole] = heap[child - 1];
+            hole = child - 1;
+        }
+        pushHeap(hole, value);
+    };
+    for (const cell of cells) {
+        heap.push(cell);
+        pushHeap(heap.length - 1, cell);
+    }
+    const sorted: Cell[] = [];
+    while (heap.length) {
+        sorted.push(heap[0]);
+        const last = heap.length - 1;
+        if (last > 0) {
+            const value = heap[last];
+            heap[last] = heap[0];
+            adjustHeap(last, value);
+        }
+        heap.pop();
+    }
+    return sorted;
+}
+
 const superLuminance: Method = (_cv, px, width, height, { grid }) => {
     const n = width * height;
-    const sum3 = new Uint16Array(n); // 3 * luminance, exact
+    const sum3 = new Uint16Array(n); // GetLuminance: channel sum (exact), / 3
     for (let i = 0, k = 0; i < n; i++, k += 4) sum3[i] = px[k] + px[k + 1] + px[k + 2];
 
+    // GetSquareGridMax
     const steps = Math.round(grid);
     const sr = height / steps;
     const sc = width / steps;
-    const cells: { x: number, y: number, max3: number }[] = [];
+    const cells: Cell[] = [];
     for (let i = 0; i < steps; i++) {
         const r0 = Math.trunc(i * sr);
         const r1 = Math.min(r0 + Math.trunc(sr), height - 1);
@@ -255,44 +330,65 @@ const superLuminance: Method = (_cv, px, width, height, { grid }) => {
             for (let r = r0; r <= r1; r++) {
                 for (let c = c0; c <= c1; c++) max3 = Math.max(max3, sum3[r * width + c]);
             }
-            const p = (r1 - r0 + 1) * (c1 - c0 + 1);
-            let br = 0;
+            let br = 0; // integer sums, exact in any order
             let bc = 0;
             for (let r = r0; r <= r1; r++) br += r * (c1 - c0 + 1);
             for (let c = c0; c <= c1; c++) bc += c * (r1 - r0 + 1);
-            if (max3 > 0) cells.push({ x: br / p, y: bc / p, max3 });
+            const p = (r1 - r0 + 1) * (c1 - c0 + 1);
+            cells.push({ row: br / p, col: bc / p, intensity: max3 / 3 });
         }
     }
-    cells.sort((a, b) => b.max3 - a.max3);
+    const sorted = sortLikePriorityQueue(cells);
+    let nc = 0; // cells with maximum 0 never count, and sit at the end
+    while (nc < sorted.length && sorted[nc].intensity > 0) nc++;
 
     // prefix sums over the sorted cells of 1, x, x^2 + y^2, y and the same divided by the maximum
-    const P = Array.from({ length: 4 }, () => new Float64Array(cells.length + 1));
-    const Q = Array.from({ length: 4 }, () => new Float64Array(cells.length + 1));
-    cells.forEach(({ x, y, max3 }, i) => {
-        const m = max3 / 3;
+    const P = Array.from({ length: 4 }, () => new Float64Array(nc + 1));
+    const Q = Array.from({ length: 4 }, () => new Float64Array(nc + 1));
+    for (let g = 0; g < nc; g++) {
+        const { row: x, col: y, intensity: m } = sorted[g];
         [1, x, x * x + y * y, y].forEach((term, a) => {
-            P[a][i + 1] = P[a][i] + term;
-            Q[a][i + 1] = Q[a][i] + term / m;
+            P[a][g + 1] = P[a][g] + term;
+            Q[a][g + 1] = Q[a][g] + term / m;
         });
-    });
-    // how many cells have a maximum >= the value, for every value (a 0 pixel counts as 1e-10 in the C++)
+    }
+    // how many cells have a maximum >= the value, for every channel sum (a 0 pixel counts as 1e-10)
     const upTo = new Int32Array(766);
-    for (let t = 0, L = cells.length; t < 766; t++) {
-        while (L > 0 && cells[L - 1].max3 < Math.max(t, 1)) L--;
+    for (let t = 0, L = nc; t < 766; t++) {
+        const val = Math.max(t / 3, 0.0000000001);
+        while (L > 0 && sorted[L - 1].intensity < val) L--;
         upTo[t] = L;
     }
 
+    // SuPeR, then the recombination into color
     const D = height * height + width * width;
+    const exact = (r: number, c: number, val: number): number => {
+        let w = 0;
+        let ret = 0;
+        for (let g = 0; g < nc && val <= sorted[g].intensity; g++) {
+            const x = r - sorted[g].row;
+            const y = c - sorted[g].col;
+            let d = x * x + y * y;
+            d = 1 - d / D;
+            ret += (d * val) / sorted[g].intensity;
+            w += d;
+        }
+        return w > 0 ? ret / w : 0;
+    };
     for (let r = 0, i = 0, k = 0; r < height; r++) {
         for (let c = 0; c < width; c++, i++, k += 4) {
-            const L = upTo[sum3[i]];
             const z = sum3[i] / 3;
-            const val = Math.max(z, 1e-10);
+            const L = upTo[sum3[i]];
+            if (z === 0 || L === 0) { px[k] = 0; px[k + 1] = 0; px[k + 2] = 0; continue; }
+            const val = z;
             const q = r * r + c * c;
             const w = P[0][L] - (q * P[0][L] - 2 * r * P[1][L] + P[2][L] - 2 * c * P[3][L]) / D;
             const ret = val * (Q[0][L] - (q * Q[0][L] - 2 * r * Q[1][L] + Q[2][L] - 2 * c * Q[3][L]) / D);
-            const u = z > 0 && w > 0 ? (255 * (ret / w)) / z : 0;
-            for (let ch = k; ch < k + 3; ch++) px[ch] = z > 0 ? Math.trunc(Math.min(255, px[ch] * u)) : 0;
+            let u = (255 * (ret / w)) / z;
+            if (nearInteger(px[k] * u) || nearInteger(px[k + 1] * u) || nearInteger(px[k + 2] * u)) {
+                u = (255 * exact(r, c, val)) / z;
+            }
+            for (let ch = k; ch < k + 3; ch++) px[ch] = Math.trunc(Math.min(255, px[ch] * u));
         }
     }
 };
