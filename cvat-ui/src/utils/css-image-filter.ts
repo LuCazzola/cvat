@@ -33,11 +33,22 @@ export function cssImageFilter(
 ): string {
     const gamma = gammaOf(imageFilters);
     if (!document.getElementById(GAMMA_ID)) {
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        const ns = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(ns, 'svg');
+        const filter = document.createElementNS(ns, 'filter');
+        const transfer = document.createElementNS(ns, 'feComponentTransfer');
         svg.setAttribute('style', 'position: absolute; width: 0; height: 0');
-        svg.innerHTML = `<filter id="${GAMMA_ID}" color-interpolation-filters="sRGB"><feComponentTransfer>${
-            ['R', 'G', 'B'].map((c) => `<feFunc${c} type="gamma" amplitude="1" offset="0" exponent="1"/>`).join('')
-        }</feComponentTransfer></filter>`;
+        filter.setAttribute('id', GAMMA_ID);
+        filter.setAttribute('color-interpolation-filters', 'sRGB');
+        ['R', 'G', 'B'].forEach((c) => {
+            const func = document.createElementNS(ns, `feFunc${c}`);
+            func.setAttribute('type', 'gamma');
+            func.setAttribute('amplitude', '1');
+            func.setAttribute('offset', '0');
+            transfer.appendChild(func);
+        });
+        filter.appendChild(transfer);
+        svg.appendChild(filter);
         document.body.appendChild(svg);
     }
     document.querySelectorAll(`#${GAMMA_ID} feFuncR, #${GAMMA_ID} feFuncG, #${GAMMA_ID} feFuncB`)
