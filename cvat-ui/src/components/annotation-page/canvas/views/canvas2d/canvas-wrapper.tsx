@@ -79,6 +79,7 @@ import {
     multiSelectObjectModifierFromKeyMap,
     getSelectedStates,
 } from 'utils/multi-selection';
+import { cssImageFilter, pixelFilters, pixelFiltersChanged } from 'utils/css-image-filter';
 import ImageSetupsContent from './image-setups-content';
 import CanvasTipsComponent from './canvas-hints';
 
@@ -655,15 +656,18 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         if (
             brightnessLevel !== prevProps.brightnessLevel ||
             contrastLevel !== prevProps.contrastLevel ||
-            saturationLevel !== prevProps.saturationLevel
+            saturationLevel !== prevProps.saturationLevel ||
+            imageFilters !== prevProps.imageFilters
         ) {
             canvasInstance.configure({
-                CSSImageFilter:
-                    `brightness(${brightnessLevel}) contrast(${contrastLevel}) saturate(${saturationLevel})`,
+                CSSImageFilter: cssImageFilter(imageFilters, brightnessLevel, contrastLevel, saturationLevel),
             });
         }
 
-        if (prevProps.imageFilters !== imageFilters) {
+        // gamma is in the CSS filter above: only the pixel filters need the frame drawn again
+        const pixelChanged = prevProps.imageFilters !== imageFilters &&
+            pixelFiltersChanged(prevProps.imageFilters, imageFilters);
+        if (pixelChanged) {
             canvasInstance.configure({ forceFrameUpdate: true });
         }
 
@@ -674,7 +678,7 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
             prevProps.renderData !== renderData
         ) {
             this.updateCanvas();
-        } else if (prevProps.imageFilters !== imageFilters) {
+        } else if (pixelChanged) {
             // In case of frequent image filters changes, we apply debounced canvas update
             // that makes UI smoother
             this.debouncedUpdate();
@@ -1188,7 +1192,8 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
                     if (prop === 'data') {
                         return async (...args: any[]) => {
                             const originalImage = await _frameData.data(...args);
-                            const imageIsNotProcessed = imageFilters.some((imageFilter: ImageFilter) => (
+                            const filters = pixelFilters(imageFilters);
+                            const imageIsNotProcessed = filters.some((imageFilter: ImageFilter) => (
                                 imageFilter.modifier.currentProcessedImage !== frame
                             ));
 
@@ -1201,7 +1206,7 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
                                     ctx.drawImage(imageBitmap, 0, 0, renderWidth, renderHeight);
                                     const imageData = ctx.getImageData(0, 0, renderWidth, renderHeight);
 
-                                    const newImageData = imageFilters
+                                    const newImageData = filters
                                         .reduce((oldImageData, activeImageModifier) => activeImageModifier
                                             .modifier.processImage(oldImageData, frame), imageData);
                                     const newImageBitmap = await createImageBitmap(newImageData);
@@ -1243,6 +1248,7 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
             brightnessLevel,
             contrastLevel,
             saturationLevel,
+            imageFilters,
         } = this.props;
         const { canvasInstance } = this.props as { canvasInstance: Canvas };
 
@@ -1259,8 +1265,7 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         canvasInstance.grid(gridSize, gridSize);
 
         canvasInstance.configure({
-            CSSImageFilter:
-                `brightness(${brightnessLevel}) contrast(${contrastLevel}) saturate(${saturationLevel})`,
+            CSSImageFilter: cssImageFilter(imageFilters, brightnessLevel, contrastLevel, saturationLevel),
         });
 
         canvasInstance.fitCanvas();
