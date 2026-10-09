@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: MIT
 
 import React, { useEffect } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
 import Layout from 'antd/lib/layout';
 import Spin from 'antd/lib/spin';
 import notification from 'antd/lib/notification';
@@ -22,12 +23,13 @@ import { JobNotFoundComponent } from 'components/common/not-found';
 import StatisticsModalComponent from 'components/annotation-page/top-bar/statistics-modal';
 import AnnotationTopBarContainer from 'containers/annotation-page/top-bar/top-bar';
 import AudioAnnotationPage from 'audio/components/annotation-page/audio-annotation-page';
-import { Workspace } from 'reducers';
+import { CombinedState, Workspace } from 'reducers';
 import { usePrevious } from 'utils/hooks';
 import EventRecorder from 'utils/event-recorder';
 import { readLatestFrame } from 'utils/remember-latest-frame';
 import { EventScope } from 'cvat-core/src/enums';
 import { filterApplicableForType } from 'utils/filter-applicable-labels';
+import { applyColorPreset } from 'utils/color-preset';
 import SearchFramesModal from './top-bar/search-modal';
 
 interface Props {
@@ -48,6 +50,8 @@ export default function AnnotationPageComponent(props: Props): JSX.Element {
         getJob, closeJob, saveLogs, changeFrame,
     } = props;
     const prevJob = usePrevious(job);
+    const dispatch = useDispatch();
+    const username = useSelector((state: CombinedState) => state.auth.user?.username);
     const prevFetching = usePrevious(fetching);
 
     useEffect(() => {
@@ -76,6 +80,7 @@ export default function AnnotationPageComponent(props: Props): JSX.Element {
 
     useEffect(() => {
         if (prevFetching && !fetching && !prevJob && job) {
+            if (username) applyColorPreset(username, dispatch);
             const latestFrame = readLatestFrame(job.id);
 
             if (typeof latestFrame === 'number' &&

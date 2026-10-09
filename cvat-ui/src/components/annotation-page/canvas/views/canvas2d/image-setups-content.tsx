@@ -25,6 +25,8 @@ import {
 } from 'actions/settings-actions';
 import { clamp } from 'utils/math';
 import { GridColor, CombinedState, PlayerSettingsState } from 'reducers';
+import notification from 'antd/lib/notification';
+import { saveColorPreset } from 'utils/color-preset';
 import GammaFilter from './gamma-filter';
 
 const minGridSize = 5;
@@ -41,6 +43,8 @@ export default function ImageSetupsContent(): JSX.Element {
         gridSize,
         grid: gridEnabled,
     } = useSelector((state: CombinedState): PlayerSettingsState => state.settings.player);
+    const settings = useSelector((state: CombinedState) => state.settings);
+    const username = useSelector((state: CombinedState) => state.auth.user?.username);
 
     return (
         <div className='cvat-canvas-image-setups-content'>
@@ -187,6 +191,21 @@ export default function ImageSetupsContent(): JSX.Element {
                         }}
                     >
                         Reset color settings
+                    </Button>
+                </Col>
+                <Col>
+                    <Button
+                        className='cvat-image-setups-save-color-settings-button'
+                        disabled={!username}
+                        onClick={() => {
+                            saveColorPreset(username as string, settings);
+                            notification.success({
+                                message: `Saved as the default for ${username}`,
+                                description: 'Applied whenever you open a job in this browser.',
+                            });
+                        }}
+                    >
+                        Save as my default
                     </Button>
                 </Col>
             </Row>
