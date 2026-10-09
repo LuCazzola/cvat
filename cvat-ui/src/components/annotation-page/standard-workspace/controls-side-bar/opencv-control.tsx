@@ -25,6 +25,7 @@ import {
     getCore, Job, ObjectState, ObjectType, ShapeType,
 } from 'cvat-core-wrapper';
 import openCVWrapper from 'utils/opencv-wrapper/opencv-wrapper';
+import { EnhancementOptions } from 'cvat-core/src/opencv/enhancement';
 import {
     CombinedState, ActiveControl, ToolsBlockerState,
 } from 'reducers';
@@ -36,7 +37,9 @@ import LabelSelector from 'components/label-selector/label-selector';
 import CVATTooltip from 'components/common/cvat-tooltip';
 import ApproximationAccuracy from 'components/annotation-page/standard-workspace/controls-side-bar/approximation-accuracy';
 import { enableImageFilter as enableImageFilterAction, disableImageFilter as disableImageFilterAction } from 'actions/settings-actions';
-import { ImageFilter, ImageFilterAlias, hasFilter } from 'utils/image-processing';
+import {
+    ImageFilter, ImageFilterAlias, hasFilter, ENHANCEMENTS,
+} from 'utils/image-processing';
 import { openAnnotationsActionModal } from 'components/annotation-page/annotations-actions/annotations-actions-modal';
 import withVisibilityHandling from './handle-popover-visibility';
 
@@ -387,7 +390,7 @@ class OpenCVControlComponent extends React.PureComponent<Props & DispatchToProps
 
     private renderImageContent():JSX.Element {
         const { enableImageFilter, disableImageFilter, filters } = this.props;
-        const clahe = hasFilter(filters, ImageFilterAlias.CLAHE);
+        const enhancement = hasFilter(filters, ImageFilterAlias.ENHANCEMENT);
         return (
             <Row justify='start' gutter={[8, 8]}>
                 <Col>
@@ -414,40 +417,48 @@ class OpenCVControlComponent extends React.PureComponent<Props & DispatchToProps
                         </Button>
                     </CVATTooltip>
                 </Col>
-                <Col>
-                    <CVATTooltip title='CLAHE (adaptive histogram equalization)' className='cvat-opencv-image-tool'>
-                        <Button
-                            className={clahe ?
-                                'cvat-opencv-clahe-tool-button cvat-opencv-image-tool-active' : 'cvat-opencv-clahe-tool-button'}
-                            onClick={(e: React.MouseEvent<HTMLElement>) => {
-                                if (!clahe) {
-                                    enableImageFilter({
-                                        modifier: openCVWrapper.imgproc.clahe({ clipLimit: 2 }),
-                                        alias: ImageFilterAlias.CLAHE,
-                                    });
-                                } else {
-                                    (e.target as HTMLElement).blur();
-                                    disableImageFilter(ImageFilterAlias.CLAHE);
-                                }
-                            }}
-                        >
-                            CLAHE
-                        </Button>
-                    </CVATTooltip>
+                <Col span={24}>
+                    <Text>Enhancement</Text>
+                    <Select
+                        className='cvat-opencv-enhancement-select'
+                        style={{ width: '100%' }}
+                        value={enhancement ? (enhancement.modifier as any).method : 'none'}
+                        options={['none', ...Object.keys(ENHANCEMENTS)].map((value) => ({ value, label: value }))}
+                        onChange={(method: string) => {
+                            if (method === 'none') {
+                                disableImageFilter(ImageFilterAlias.ENHANCEMENT);
+                                return;
+                            }
+                            const options = {
+                                method,
+                                params: Object.fromEntries(ENHANCEMENTS[method].map((p) => [p.label, p.value])),
+                            };
+                            if (enhancement) {
+                                enableImageFilter(enhancement, options);
+                            } else {
+                                enableImageFilter({
+                                    modifier: openCVWrapper.imgproc.enhancement(options as EnhancementOptions),
+                                    alias: ImageFilterAlias.ENHANCEMENT,
+                                });
+                            }
+                        }}
+                    />
                 </Col>
-                {clahe && (
-                    <Col span={24}>
-                        <Text>Clip limit</Text>
-                        <Slider
-                            className='cvat-opencv-clahe-clip-limit'
-                            min={0.5}
-                            max={10}
-                            step={0.5}
-                            value={(clahe.modifier as any).clipLimit}
-                            onChange={(clipLimit: number) => enableImageFilter(clahe, { clipLimit })}
-                        />
-                    </Col>
-                )}
+                {enhancement && ENHANCEMENTS[(enhancement.modifier as any).method].map(({ label, ...range }) => {
+                    const { method, params } = enhancement.modifier as any;
+                    return (
+                        <Col span={24} key={label}>
+                            <Text>{label === 'alpha' && method === 'rek' && params.alpha < 0 ? 'alpha (auto)' : label}</Text>
+                            <Slider
+                                {...range}
+                                value={params[label]}
+                                onChange={(value: number) => enableImageFilter(enhancement, {
+                                    method, params: { ...params, [label]: value },
+                                })}
+                            />
+                        </Col>
+                    );
+                })}
             </Row>
         );
     }
