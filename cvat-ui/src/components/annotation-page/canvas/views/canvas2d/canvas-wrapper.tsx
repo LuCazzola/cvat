@@ -1203,6 +1203,7 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
                                     const { renderWidth, renderHeight } = originalImage;
                                     const newImageBitmap = await filteredFrame(frame, originalImage, filters);
                                     filters.forEach((imageFilter: ImageFilter) => {
+                                        // eslint-disable-next-line no-param-reassign
                                         imageFilter.modifier.currentProcessedImage = frame;
                                     });
                                     prefetchNeighbours(jobInstance, frame, filters);

@@ -15,7 +15,11 @@ interface FrameImage {
 
 const CACHE_SIZE = 4; // ~100 MB each: the frame on screen, its neighbours, one spare
 const cache = new Map<string, Promise<ImageBitmap>>();
-const pending = new Map<number, { resolve: (bitmap: ImageBitmap) => void, reject: (error: Error) => void }>();
+interface PendingRequest {
+    resolve(bitmap: ImageBitmap): void;
+    reject(error: Error): void;
+}
+const pending = new Map<number, PendingRequest>();
 let worker: Worker | null = null;
 let nextId = 0;
 
