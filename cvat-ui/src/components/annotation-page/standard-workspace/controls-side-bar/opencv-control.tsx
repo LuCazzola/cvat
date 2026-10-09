@@ -422,6 +422,7 @@ class OpenCVControlComponent extends React.PureComponent<Props & DispatchToProps
                     <Select
                         className='cvat-opencv-enhancement-select'
                         style={{ width: '100%' }}
+                        listHeight={400} // all the methods at once, none hidden below a scroll
                         value={enhancement ? (enhancement.modifier as any).method : 'none'}
                         options={['none', ...Object.keys(ENHANCEMENTS)].map((value) => ({ value, label: value }))}
                         onChange={(method: string) => {
