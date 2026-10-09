@@ -7,7 +7,6 @@ import { ImageProcessing } from 'cvat-core-wrapper';
 export enum ImageFilterAlias {
     HISTOGRAM_EQUALIZATION = 'opencv.histogramEqualization',
     ENHANCEMENT = 'opencv.enhancement',
-    HIGHLIGHTS = 'redscrap.highlights',
     GAMMA_CORRECTION = 'fabric.gammaCorrection',
 }
 
