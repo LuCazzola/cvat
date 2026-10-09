@@ -8,12 +8,13 @@ import EnhancementImplementation from 'cvat-core/src/opencv/enhancement';
 import HistogramEqualizationImplementation from 'cvat-core/src/opencv/histogram-equalization';
 
 const scope = globalThis as any;
-let openCV: Promise<any> | null = null;
+let openCV: Promise<{ cv: any }> | null = null;
 
-function loadOpenCV(url: string): Promise<any> {
-    // same handshake as utils/opencv-wrapper on the page: Module.onRuntimeInitialized, then the global cv
+function loadOpenCV(url: string): Promise<{ cv: any }> {
+    // same handshake as utils/opencv-wrapper on the page: Module.onRuntimeInitialized, then the global cv. Wrapped in
+    // an object: cv is a thenable (Emscripten's Module.then), and resolving a promise with it loops forever.
     openCV = openCV ?? new Promise((resolve) => {
-        scope.Module = { onRuntimeInitialized: () => resolve(scope.cv) };
+        scope.Module = { onRuntimeInitialized: () => resolve({ cv: scope.cv }) };
         scope.importScripts(url);
     });
     return openCV;
@@ -24,7 +25,7 @@ scope.onmessage = async (event: MessageEvent) => {
         id, bitmap, width, height, filters, openCVUrl,
     } = event.data;
     try {
-        const cv = await loadOpenCV(openCVUrl);
+        const { cv } = await loadOpenCV(openCVUrl);
         const ctx = new OffscreenCanvas(width, height).getContext('2d') as OffscreenCanvasRenderingContext2D;
         ctx.drawImage(bitmap, 0, 0, width, height);
         bitmap.close();
