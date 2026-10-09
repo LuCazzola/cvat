@@ -2,10 +2,13 @@
 //
 // SPDX-License-Identifier: MIT
 
+/* eslint-disable no-param-reassign */ // the methods edit the pixel buffer in place: frames are ~100 MB each
+
 import { BaseImageFilter, SerializedImageFilter } from './image-processing';
 
 // Ports of RedScrap's image enhancement (src/redscrap/image_enhancement/enhancement/assets), same names as the
-// enhanced/<method>/ folders of a bag. Outputs match the production code on the same image (the RedScrap repo checks it).
+// enhanced/<method>/ folders of a bag. RedScrap's scripts/check_cvat_enhancement.sh compares them with the
+// production code on a real frame.
 export type EnhancementMethod = 'clahe_luminance' | 'clahe_channels' | 'he_luminance' | 'he_channels' |
 'rek' | 'riesz' | 'riesz_luminance_only';
 
@@ -17,7 +20,10 @@ export interface EnhancementOptions {
 type Method = (cv: any, px: Uint8ClampedArray, width: number, height: number, params: Record<string, number>) => void;
 
 // Runs fn on an 8-bit Mat of the RGB pixels and writes its RGB result back into px (alpha untouched).
-function onRgb(cv: any, px: Uint8ClampedArray, width: number, height: number, fn: (rgb: any, keep: (m: any) => any) => any): void {
+function onRgb(
+    cv: any, px: Uint8ClampedArray, width: number, height: number,
+    fn: (rgb: any, keep: (m: any) => any) => any,
+): void {
     const mats: any[] = [];
     const keep = (m: any): any => { mats.push(m); return m; };
     try {
@@ -88,7 +94,8 @@ const rek: Method = (_cv, px, width, height, { p, alpha: alphaParam }) => {
     if (MM === mm) return; // flat image: the C++ divides by zero here
 
     let alpha = alphaParam;
-    if (alpha < 0) { // auto: from the mean and spread of the light and dark regions (ThresholdImage2 + MeanOnDLRegionsPixels)
+    // auto: from the mean and spread of the light and dark regions (ThresholdImage2 + MeanOnDLRegionsPixels)
+    if (alpha < 0) {
         const thresh = (MM - mm) * 0.5 + mm;
         const light = new Uint8Array(n);
         let pl = 0; let pd = 0; let LL = 0; let DD = 0;
@@ -117,7 +124,9 @@ const rek: Method = (_cv, px, width, height, { p, alpha: alphaParam }) => {
 
 // riesz_lib.py riesz_fractional_homomorphic_enhancement: log, FFT, radial gain gainLow..gainHigh ~ r^alpha, inverse,
 // exp. The filter is built directly in unshifted FFT order, which equals fftshift -> filter -> ifftshift.
-function riesz(cv: any, y: Float64Array, width: number, height: number, { alpha, gainHigh, gainLow }: Record<string, number>): Uint8Array {
+function riesz(
+    cv: any, y: Float64Array, width: number, height: number, { alpha, gainHigh, gainLow }: Record<string, number>,
+): Uint8Array {
     const logY = new cv.Mat(height, width, cv.CV_32F);
     const spectrum = new cv.Mat();
     const back = new cv.Mat();
@@ -138,6 +147,7 @@ function riesz(cv: any, y: Float64Array, width: number, height: number, { alpha,
                 s[k + 1] *= gain;
             }
         }
+        // eslint-disable-next-line no-bitwise
         cv.dft(spectrum, back, cv.DFT_INVERSE | cv.DFT_SCALE | cv.DFT_REAL_OUTPUT);
         const b = back.data32F;
         const out = new Uint8Array(y.length);

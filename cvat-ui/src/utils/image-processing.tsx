@@ -23,21 +23,22 @@ export function hasFilter(filters: ImageFilter[], alias: ImageFilterAlias): Imag
     return null;
 }
 
-// RedScrap image enhancement methods (cvat-core opencv/enhancement.ts): sliders and production defaults
-export const ENHANCEMENTS: Record<string, { label: string, min: number, max: number, step: number, value: number }[]> = {
-    clahe_luminance: [{ label: 'clipLimit', min: 0.5, max: 10, step: 0.5, value: 2 }],
-    clahe_channels: [{ label: 'clipLimit', min: 0.5, max: 10, step: 0.5, value: 2 }],
+interface EnhancementParam { label: string, min: number, max: number, step: number, value: number }
+const param = (label: string, min: number, max: number, step: number, value: number): EnhancementParam => ({
+    label, min, max, step, value,
+});
+const clip = [param('clipLimit', 0.5, 10, 0.5, 2)];
+const riesz = [
+    param('alpha', 0.1, 1, 0.05, 0.4), param('gainHigh', 0.5, 3, 0.1, 1.6), param('gainLow', 0.1, 1.5, 0.1, 0.6),
+];
+
+// RedScrap image enhancement methods (cvat-core opencv/enhancement.ts): their sliders, starting from production values
+export const ENHANCEMENTS: Record<string, EnhancementParam[]> = {
+    clahe_luminance: clip,
+    clahe_channels: clip,
     he_luminance: [],
     he_channels: [],
-    rek: [{ label: 'p', min: 0.5, max: 5, step: 0.1, value: 2 }, { label: 'alpha', min: -1, max: 5, step: 0.1, value: -1 }],
-    riesz: [
-        { label: 'alpha', min: 0.1, max: 1, step: 0.05, value: 0.4 },
-        { label: 'gainHigh', min: 0.5, max: 3, step: 0.1, value: 1.6 },
-        { label: 'gainLow', min: 0.1, max: 1.5, step: 0.1, value: 0.6 },
-    ],
-    riesz_luminance_only: [
-        { label: 'alpha', min: 0.1, max: 1, step: 0.05, value: 0.4 },
-        { label: 'gainHigh', min: 0.5, max: 3, step: 0.1, value: 1.6 },
-        { label: 'gainLow', min: 0.1, max: 1.5, step: 0.1, value: 0.6 },
-    ],
+    rek: [param('p', 0.5, 5, 0.1, 2), param('alpha', -1, 5, 0.1, -1)], // alpha < 0: estimated from the image
+    riesz,
+    riesz_luminance_only: riesz,
 };
