@@ -6,6 +6,7 @@ import { ImageProcessing } from 'cvat-core-wrapper';
 
 export enum ImageFilterAlias {
     HISTOGRAM_EQUALIZATION = 'opencv.histogramEqualization',
+    CLAHE = 'opencv.clahe',
     GAMMA_CORRECTION = 'fabric.gammaCorrection',
 }
 

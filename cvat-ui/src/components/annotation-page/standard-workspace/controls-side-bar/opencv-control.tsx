@@ -13,6 +13,7 @@ import Tabs from 'antd/lib/tabs';
 import Button from 'antd/lib/button';
 import Progress from 'antd/lib/progress';
 import Select from 'antd/lib/select';
+import Slider from 'antd/lib/slider';
 import notification from 'antd/lib/notification';
 import Alert from 'antd/lib/alert';
 
@@ -386,8 +387,9 @@ class OpenCVControlComponent extends React.PureComponent<Props & DispatchToProps
 
     private renderImageContent():JSX.Element {
         const { enableImageFilter, disableImageFilter, filters } = this.props;
+        const clahe = hasFilter(filters, ImageFilterAlias.CLAHE);
         return (
-            <Row justify='start'>
+            <Row justify='start' gutter={[8, 8]}>
                 <Col>
                     <CVATTooltip title='Histogram equalization' className='cvat-opencv-image-tool'>
                         <Button
@@ -412,6 +414,40 @@ class OpenCVControlComponent extends React.PureComponent<Props & DispatchToProps
                         </Button>
                     </CVATTooltip>
                 </Col>
+                <Col>
+                    <CVATTooltip title='CLAHE (adaptive histogram equalization)' className='cvat-opencv-image-tool'>
+                        <Button
+                            className={clahe ?
+                                'cvat-opencv-clahe-tool-button cvat-opencv-image-tool-active' : 'cvat-opencv-clahe-tool-button'}
+                            onClick={(e: React.MouseEvent<HTMLElement>) => {
+                                if (!clahe) {
+                                    enableImageFilter({
+                                        modifier: openCVWrapper.imgproc.clahe({ clipLimit: 2 }),
+                                        alias: ImageFilterAlias.CLAHE,
+                                    });
+                                } else {
+                                    (e.target as HTMLElement).blur();
+                                    disableImageFilter(ImageFilterAlias.CLAHE);
+                                }
+                            }}
+                        >
+                            CLAHE
+                        </Button>
+                    </CVATTooltip>
+                </Col>
+                {clahe && (
+                    <Col span={24}>
+                        <Text>Clip limit</Text>
+                        <Slider
+                            className='cvat-opencv-clahe-clip-limit'
+                            min={0.5}
+                            max={10}
+                            step={0.5}
+                            value={(clahe.modifier as any).clipLimit}
+                            onChange={(clipLimit: number) => enableImageFilter(clahe, { clipLimit })}
+                        />
+                    </Col>
+                )}
             </Row>
         );
     }

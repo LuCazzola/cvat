@@ -6,6 +6,7 @@ import IntelligentScissorsImplementation, {
     type IntelligentScissorsInterface,
 } from './intelligent-scissors';
 import HistogramEqualizationImplementation from './histogram-equalization';
+import ClaheImplementation, { ClaheOptions } from './clahe';
 import TrackerMILImplementation, {
     type TrackerMILInterface,
 } from './tracker-mil';
@@ -43,6 +44,7 @@ export interface OpenCVInterface {
     };
     imgproc: {
         hist: () => ImageProcessing;
+        clahe: (options: ClaheOptions) => ImageProcessing;
     };
     tracking: {
         trackerMIL: {
@@ -237,6 +239,7 @@ export function createOpenCVInterface(cv: any): OpenCVInterface {
 
         imgproc: {
             hist: () => new HistogramEqualizationImplementation(cv),
+            clahe: (options: ClaheOptions) => new ClaheImplementation(cv, options),
         },
 
         tracking: {
