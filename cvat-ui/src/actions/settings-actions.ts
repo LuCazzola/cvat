@@ -14,6 +14,7 @@ import { OrientationVisibility } from 'cvat-canvas3d-wrapper';
 import { SerializedImageFilter } from 'cvat-core-wrapper';
 import { ImageFilter, ImageFilterAlias } from 'utils/image-processing';
 import GammaCorrection, { GammaFilterOptions } from 'utils/fabric-wrapper/gamma-correction';
+import Highlights, { HighlightsOptions } from 'utils/highlights';
 import { resolveConflicts } from 'utils/conflict-detector';
 import { migrateShortcutsSettings, SHORTCUTS_SETTINGS_VERSION } from 'utils/shortcuts-migration';
 import { shortcutsActions } from './shortcuts-actions';
@@ -483,6 +484,12 @@ export function restoreSettingsAsync(): ThunkAction {
                         alias: ImageFilterAlias.GAMMA_CORRECTION,
                     });
                 }
+                if (filter.alias === ImageFilterAlias.HIGHLIGHTS) {
+                    newSettings.imageFilters.push({
+                        modifier: new Highlights(filter.params as HighlightsOptions),
+                        alias: ImageFilterAlias.HIGHLIGHTS,
+                    });
+                }
             });
         }
 
@@ -511,7 +518,7 @@ export function restoreSettingsAsync(): ThunkAction {
 }
 
 export function updateCachedSettings(settings: CombinedState['settings'], shortcuts: CombinedState['shortcuts']): void {
-    const supportedImageFilters = [ImageFilterAlias.GAMMA_CORRECTION];
+    const supportedImageFilters = [ImageFilterAlias.GAMMA_CORRECTION, ImageFilterAlias.HIGHLIGHTS];
     const settingsForSaving = {
         player: settings.player,
         workspace: settings.workspace,
