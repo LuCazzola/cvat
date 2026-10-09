@@ -10,7 +10,7 @@ import { BaseImageFilter, SerializedImageFilter } from './image-processing';
 // enhanced/<method>/ folders of a bag. RedScrap's scripts/check_cvat_enhancement.sh compares them with the
 // production code on a real frame.
 export type EnhancementMethod = 'clahe_luminance' | 'clahe_channels' | 'he_luminance' | 'he_channels' |
-'rek' | 'riesz' | 'riesz_luminance_only';
+'rek' | 'riesz' | 'riesz_luminance_only' | 'super_color' | 'super_luminance';
 
 export interface EnhancementOptions {
     method: EnhancementMethod;
@@ -186,6 +186,116 @@ const rieszGray: Method = (cv, px, width, height, params) => {
     }
 };
 
+// SuPeR (Milano Retinex), super_capi.cpp / super_luminance_capi.cpp. The C++ loops, for every pixel, over all brighter
+// levels or grid cells (~30 s per 24 MP frame); the summed weight is linear in the pixel position, so here running
+// sums over the levels / the sorted cells give the same sums in O(1) per pixel. Same result up to float rounding.
+
+// super_capi.cpp Super::compute: per channel, grid of block maxima; out = v * sum(w_k / k) / sum(w_k) over the levels
+// k > v, w_k = sum over the blocks with maximum k of (K - squared distance to the block centre), K = 1.000000001 * diag^2
+const superColor: Method = (_cv, px, width, height, { grid }) => {
+    const M = Math.round(grid);
+    const dR = Math.ceil(height / M);
+    const dC = Math.ceil(width / M);
+    const K = (1 + 1e-9) * (height * height + width * width);
+    for (let ch = 0; ch < 3; ch++) {
+        const bins = new Uint8Array(M * M);
+        for (let r = 0; r < height; r++) {
+            const R = Math.floor(r / dR) * M;
+            for (let c = 0, k = r * width * 4 + ch; c < width; c++, k += 4) {
+                const b = R + Math.floor(c / dC);
+                if (px[k] > bins[b]) bins[b] = px[k];
+            }
+        }
+        // per level k: count, sum x, sum x^2, sum y, sum y^2 of the block centres, plain (S) and divided by k (T),
+        // then summed from the top so that index v holds the totals over the levels above v
+        const S = Array.from({ length: 5 }, () => new Float64Array(257));
+        const T = Array.from({ length: 5 }, () => new Float64Array(257));
+        for (let i = 0; i < M; i++) {
+            for (let j = 0; j < M; j++) {
+                const v = bins[i * M + j];
+                const x = dR * (i + 0.5);
+                const y = dC * (j + 0.5);
+                [1, x, x * x, y, y * y].forEach((term, a) => { S[a][v] += term; T[a][v] += v ? term / v : 0; });
+            }
+        }
+        for (let a = 0; a < 5; a++) {
+            for (let v = 255; v >= 0; v--) { S[a][v] += S[a][v + 1]; T[a][v] += T[a][v + 1]; }
+        }
+        for (let r = 0; r < height; r++) {
+            for (let c = 0, k = r * width * 4 + ch; c < width; c++, k += 4) {
+                const v = px[k] + 1; // levels strictly above the pixel
+                const A = K - r * r - c * c;
+                const den = A * S[0][v] + 2 * r * S[1][v] - S[2][v] + 2 * c * S[3][v] - S[4][v];
+                const num = A * T[0][v] + 2 * r * T[1][v] - T[2][v] + 2 * c * T[3][v] - T[4][v];
+                px[k] = Math.trunc(255 * (den > 0 ? (px[k] * num) / den : 1));
+            }
+        }
+    }
+};
+
+// super_luminance_capi.cpp: SuPeR on the channel mean with gridSize x gridSize overlapping windows, sorted by maximum;
+// each pixel sums over the windows whose maximum is >= its value, weight 1 - squared distance / diag^2
+const superLuminance: Method = (_cv, px, width, height, { grid }) => {
+    const n = width * height;
+    const sum3 = new Uint16Array(n); // 3 * luminance, exact
+    for (let i = 0, k = 0; i < n; i++, k += 4) sum3[i] = px[k] + px[k + 1] + px[k + 2];
+
+    const steps = Math.round(grid);
+    const sr = height / steps;
+    const sc = width / steps;
+    const cells: { x: number, y: number, max3: number }[] = [];
+    for (let i = 0; i < steps; i++) {
+        const r0 = Math.trunc(i * sr);
+        const r1 = Math.min(r0 + Math.trunc(sr), height - 1);
+        for (let j = 0; j < steps; j++) {
+            const c0 = Math.trunc(j * sc);
+            const c1 = Math.min(c0 + Math.trunc(sc), width - 1);
+            let max3 = 0;
+            for (let r = r0; r <= r1; r++) {
+                for (let c = c0; c <= c1; c++) max3 = Math.max(max3, sum3[r * width + c]);
+            }
+            const p = (r1 - r0 + 1) * (c1 - c0 + 1);
+            let br = 0;
+            let bc = 0;
+            for (let r = r0; r <= r1; r++) br += r * (c1 - c0 + 1);
+            for (let c = c0; c <= c1; c++) bc += c * (r1 - r0 + 1);
+            if (max3 > 0) cells.push({ x: br / p, y: bc / p, max3 });
+        }
+    }
+    cells.sort((a, b) => b.max3 - a.max3);
+
+    // prefix sums over the sorted cells of 1, x, x^2 + y^2, y and the same divided by the maximum
+    const P = Array.from({ length: 4 }, () => new Float64Array(cells.length + 1));
+    const Q = Array.from({ length: 4 }, () => new Float64Array(cells.length + 1));
+    cells.forEach(({ x, y, max3 }, i) => {
+        const m = max3 / 3;
+        [1, x, x * x + y * y, y].forEach((term, a) => {
+            P[a][i + 1] = P[a][i] + term;
+            Q[a][i + 1] = Q[a][i] + term / m;
+        });
+    });
+    // how many cells have a maximum >= the value, for every value (a 0 pixel counts as 1e-10 in the C++)
+    const upTo = new Int32Array(766);
+    for (let t = 0, L = cells.length; t < 766; t++) {
+        while (L > 0 && cells[L - 1].max3 < Math.max(t, 1)) L--;
+        upTo[t] = L;
+    }
+
+    const D = height * height + width * width;
+    for (let r = 0, i = 0, k = 0; r < height; r++) {
+        for (let c = 0; c < width; c++, i++, k += 4) {
+            const L = upTo[sum3[i]];
+            const z = sum3[i] / 3;
+            const val = Math.max(z, 1e-10);
+            const q = r * r + c * c;
+            const w = P[0][L] - (q * P[0][L] - 2 * r * P[1][L] + P[2][L] - 2 * c * P[3][L]) / D;
+            const ret = val * (Q[0][L] - (q * Q[0][L] - 2 * r * Q[1][L] + Q[2][L] - 2 * c * Q[3][L]) / D);
+            const u = z > 0 && w > 0 ? (255 * (ret / w)) / z : 0;
+            for (let ch = k; ch < k + 3; ch++) px[ch] = z > 0 ? Math.trunc(Math.min(255, px[ch] * u)) : 0;
+        }
+    }
+};
+
 export default class EnhancementImplementation extends BaseImageFilter {
     private cv: any;
     public method: EnhancementMethod;
@@ -215,6 +325,8 @@ export default class EnhancementImplementation extends BaseImageFilter {
             rek,
             riesz: rieszColor,
             riesz_luminance_only: rieszGray,
+            super_color: superColor,
+            super_luminance: superLuminance,
         };
         const px = new Uint8ClampedArray(src.data);
         methods[this.method](cv, px, src.width, src.height, params);

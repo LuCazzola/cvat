@@ -41,4 +41,6 @@ export const ENHANCEMENTS: Record<string, EnhancementParam[]> = {
     rek: [param('p', 0.5, 5, 0.1, 2), param('alpha', -1, 5, 0.1, -1)], // alpha < 0: estimated from the image
     riesz,
     riesz_luminance_only: riesz,
+    super_color: [param('grid', 5, 50, 1, 20)],
+    super_luminance: [param('grid', 5, 50, 1, 20)],
 };
