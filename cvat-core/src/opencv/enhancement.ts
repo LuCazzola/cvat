@@ -191,7 +191,8 @@ const rieszGray: Method = (cv, px, width, height, params) => {
 // sums over the levels / the sorted cells give the same sums in O(1) per pixel. Same result up to float rounding.
 
 // super_capi.cpp Super::compute: per channel, grid of block maxima; out = v * sum(w_k / k) / sum(w_k) over the levels
-// k > v, w_k = sum over the blocks with maximum k of (K - squared distance to the block centre), K = 1.000000001 * diag^2
+// k > v, w_k = sum over the blocks with maximum k of (K - squared distance to the block centre),
+// K = 1.000000001 * diag^2
 const superColor: Method = (_cv, px, width, height, { grid }) => {
     const M = Math.round(grid);
     const dR = Math.ceil(height / M);
