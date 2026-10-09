@@ -80,6 +80,7 @@ import {
     getSelectedStates,
 } from 'utils/multi-selection';
 import { cssImageFilter, pixelFilters, pixelFiltersChanged } from 'utils/css-image-filter';
+import { filteredFrame, prefetchNeighbours } from 'utils/pixel-filters';
 import ImageSetupsContent from './image-setups-content';
 import CanvasTipsComponent from './canvas-hints';
 
@@ -1177,7 +1178,7 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
     private updateCanvas(): void {
         const {
             hiddenZLayers, annotations, frameData,
-            workspace, frame, imageFilters, renderData,
+            workspace, frame, imageFilters, renderData, jobInstance,
         } = this.props;
 
         const { canvasInstance } = this.props as { canvasInstance: Canvas };
@@ -1199,17 +1200,12 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
 
                             if (imageIsNotProcessed) {
                                 try {
-                                    const { renderWidth, renderHeight, imageData: imageBitmap } = originalImage;
-
-                                    const offscreen = new OffscreenCanvas(renderWidth, renderHeight);
-                                    const ctx = offscreen.getContext('2d') as OffscreenCanvasRenderingContext2D;
-                                    ctx.drawImage(imageBitmap, 0, 0, renderWidth, renderHeight);
-                                    const imageData = ctx.getImageData(0, 0, renderWidth, renderHeight);
-
-                                    const newImageData = filters
-                                        .reduce((oldImageData, activeImageModifier) => activeImageModifier
-                                            .modifier.processImage(oldImageData, frame), imageData);
-                                    const newImageBitmap = await createImageBitmap(newImageData);
+                                    const { renderWidth, renderHeight } = originalImage;
+                                    const newImageBitmap = await filteredFrame(frame, originalImage, filters);
+                                    filters.forEach((imageFilter: ImageFilter) => {
+                                        imageFilter.modifier.currentProcessedImage = frame;
+                                    });
+                                    prefetchNeighbours(jobInstance, frame, filters);
                                     return {
                                         renderWidth,
                                         renderHeight,
