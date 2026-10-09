@@ -133,7 +133,7 @@ export default function ImageSetupsContent(): JSX.Element {
                         <Col span={12}>
                             <Slider
                                 min={50}
-                                max={200}
+                                max={500}
                                 value={brightnessLevel}
                                 onChange={(value: number | [number, number]): void => {
                                     dispatch(changeBrightnessLevel(value as number));
